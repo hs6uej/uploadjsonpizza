@@ -19,27 +19,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Configure Multer for storage
+// Configure Multer to use a temporary directory first
+const TEMP_DIR = path.join(TARGET_DIR, 'temp');
+fs.ensureDirSync(TEMP_DIR);
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, TARGET_DIR);
+    cb(null, TEMP_DIR);
   },
   filename: (req, file, cb) => {
-    // Preserve original filename
     cb(null, file.originalname);
   }
 });
 
-const upload = multer({ 
-  storage: storage,
-  fileFilter: (req, file, cb) => {
-    if (path.extname(file.originalname).toLowerCase() === '.json') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only .json files are allowed!'));
-    }
-  }
-});
+const upload = multer({ storage: storage });
 
 // API Endpoints
 
@@ -64,14 +57,46 @@ app.get('/api/files', async (req, res) => {
   }
 });
 
-// Upload multiple JSON files
-app.post('/api/upload', upload.array('files'), (req, res) => {
+// Upload multiple JSON files with Version Control
+app.post('/api/upload', upload.array('files'), async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).send('No files were uploaded.');
   }
+
+  const versionsDir = path.join(TARGET_DIR, 'versions');
+  await fs.ensureDir(versionsDir);
+
+  const results = [];
+  const timestamp = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
+
+  for (const file of req.files) {
+    const finalPath = path.join(TARGET_DIR, file.originalname);
+    
+    try {
+      // Version Control: Move existing file to versions folder
+      if (await fs.pathExists(finalPath)) {
+        const ext = path.extname(file.originalname);
+        const name = path.basename(file.originalname, ext);
+        const versionedName = `${name}_${timestamp}${ext}`;
+        const archivePath = path.join(versionsDir, versionedName);
+        
+        await fs.move(finalPath, archivePath);
+        console.log(`Archived existing file: ${file.originalname} -> ${versionedName}`);
+      }
+      
+      // Move new file from temp to final destination
+      await fs.move(file.path, finalPath, { overwrite: true });
+      results.push(file.originalname);
+    } catch (err) {
+      console.error(`Error processing file ${file.originalname}:`, err);
+      // Clean up temp file if something went wrong
+      await fs.remove(file.path).catch(() => {});
+    }
+  }
+
   res.status(200).send({
-    message: 'Files uploaded successfully',
-    files: req.files.map(f => f.originalname)
+    message: 'Files uploaded successfully with version control',
+    files: results
   });
 });
 
