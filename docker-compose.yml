@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  upload-menu:
+    build: .
+    container_name: upload-menu-app
+    ports:
+      - "4061:3000"
+    environment:
+      - NODE_ENV=production
+      - UPLOAD_DIR=/app/chatmenupizza/Menu JSON
+    volumes:
+      # Map the host's logic directory to the container's upload directory
+      - "/app/chatmenupizza/Menu JSON:/app/chatmenupizza/Menu JSON"
+    restart: always
